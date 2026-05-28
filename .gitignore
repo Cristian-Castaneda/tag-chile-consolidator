@@ -141,3 +141,12 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ── TAG Chile Consolidator ──────────────────────────────────────────────────
+# Google service-account keys and any other secrets
+secrets/
+*.serviceaccount.json
+# Transient browser downloads + failure screenshots
+.downloads/
+# Consolidated local output (JSON/CSV fallback when Sheets isn't configured)
+output/

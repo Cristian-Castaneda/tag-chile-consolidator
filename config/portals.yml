@@ -1,0 +1,270 @@
+# ════════════════════════════════════════════════════════════════════════════
+# portals.yml — definition of every Chilean TAG autopista portal.
+#
+# The scraper reads this at runtime. Adding a new portal = a new entry here,
+# no source changes required.
+#
+# Field reference
+# ───────────────
+#   id            Stable kebab-case identifier (used in logs / config refs).
+#   name          Human-readable autopista name → becomes the Google Sheet tab.
+#   concesionaria Operating company.
+#   scraper       Which scraper module in src/scrapers/ handles this portal.
+#                 Several autopistas can share one scraper (and one login) when
+#                 they share a concesionaria portal — the orchestrator logs in
+#                 once per scraper and tags the resulting rows per-autopista.
+#   enabled       false → skipped entirely.
+#   loginUrl      Page where the RUT + password form lives.
+#   rutFormat     "split"    → RUT body and verifier digit go in separate fields
+#                 "combined" → single field, e.g. "12345678-9"
+#   fileFormat    Expected download format: xlsx | csv | pdf
+#   selectors     CSS selectors for the login form. Tried first via Playwright;
+#                 if a selector misses, the LLM navigation layer takes a
+#                 screenshot and asks Claude for the right element.
+#   notes         Human notes — quirks, captcha behavior, shared logins, etc.
+#   researched    true  → login flow verified against the live site
+#                 false → scaffolded best-effort, NEEDS verification
+# ════════════════════════════════════════════════════════════════════════════
+
+defaults:
+  rutFormat: combined
+  fileFormat: xlsx
+  timeoutMs: 45000
+  llmFallback: true
+
+portals:
+  # ──────────────────────────────────────────────────────────────────────────
+  # COPSA — Costanera Norte & Autopista Nororiente (AVO)
+  # One login at web.costaneranorte.cl covers both.
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: costanera-norte
+    name: "Costanera Norte"
+    concesionaria: "COPSA"
+    scraper: costaneranorte
+    enabled: true
+    researched: true
+    loginUrl: "https://www.costaneranorte.cl/sucursal_virtual/login.html"
+    rutFormat: split
+    fileFormat: pdf
+    selectors:
+      rut: "#RUT"          # RUT body, max 8 digits, NO dots, NO verifier
+      rutDv: "#RUTDV"      # verifier digit only (0-9 or K)
+      password: "#PASSWORD"
+      submit: "a#send"     # <a href="javascript:sendPOST()">Ingresar</a>
+      loginError: "#mensaje"
+    backend:
+      # Legacy Delphi `convenios.dll` ISAPI app — server-rendered, cookie session.
+      loginAction: "https://www.costaneranorte.cl/convenios.dll/dologin"
+    notes: >
+      Cloudflare Turnstile is ADAPTIVE: the form only forces a captcha when
+      localStorage "loginCaptchaRequired" == "1" (set after failed/suspicious
+      attempts). A fresh automated login normally submits with no captcha.
+      Boletas download as PDF; the transit detail ("tránsitos no facturados")
+      view may offer a tabular export — verify and prefer it over PDF parsing.
+      Same login/account also exposes Autopista Nororiente (AVO) transits.
+
+  - id: autopista-nororiente
+    name: "Autopista Nororiente (AVO)"
+    concesionaria: "COPSA"
+    scraper: costaneranorte
+    enabled: true
+    researched: true
+    loginUrl: "https://www.costaneranorte.cl/sucursal_virtual/login.html"
+    rutFormat: split
+    fileFormat: pdf
+    selectors:
+      rut: "#RUT"
+      rutDv: "#RUTDV"
+      password: "#PASSWORD"
+      submit: "a#send"
+      loginError: "#mensaje"
+    notes: >
+      Shares the COPSA portal and login with Costanera Norte. The costaneranorte
+      scraper runs once and splits rows between the two autopistas by portico.
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Autopase — Autopista Central & Ruta 78 / Autopista del Sol
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: autopista-central
+    name: "Autopista Central"
+    concesionaria: "Autopase"
+    scraper: autopase
+    enabled: true
+    researched: false
+    loginUrl: "https://www.autopase.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"            # TODO verify
+      password: "input[type='password']"  # TODO verify
+      submit: "button[type='submit']"     # TODO verify
+      loginError: ".error, .alert-danger" # TODO verify
+    notes: >
+      NEEDS RESEARCH. Autopase covers Autopista Central and Ruta 78 / Autopista
+      del Sol under one operator. Confirm whether one login exposes both.
+
+  - id: ruta-78-autopista-del-sol
+    name: "Ruta 78 / Autopista del Sol"
+    concesionaria: "Autopase"
+    scraper: autopase
+    enabled: true
+    researched: false
+    loginUrl: "https://www.autopase.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH. Shares the Autopase portal with Autopista Central."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Vespucio Norte + Túnel San Cristóbal
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: vespucio-norte
+    name: "Vespucio Norte + Túnel San Cristóbal"
+    concesionaria: "Vespucio Norte"
+    scraper: vespucionorte
+    enabled: true
+    researched: false
+    loginUrl: "https://www.vespucionorte.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH. Túnel San Cristóbal transits bill through this portal."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Vespucio Sur
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: vespucio-sur
+    name: "Vespucio Sur"
+    concesionaria: "Nueva Vespucio Sur"
+    scraper: vespuciosur
+    enabled: true
+    researched: false
+    loginUrl: "https://www.vespuciosur.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Acceso Vial AMB (aeropuerto)
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: amb
+    name: "Acceso Vial AMB"
+    concesionaria: "AMB"
+    scraper: amb
+    enabled: true
+    researched: false
+    loginUrl: "https://www.accessamb.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH. Domain per README is accessamb.cl."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Ruta 68 / Rutas del Pacífico
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: rutas-del-pacifico
+    name: "Ruta 68 / Rutas del Pacífico"
+    concesionaria: "Rutas del Pacífico"
+    scraper: rutasdelpacifico
+    enabled: true
+    researched: false
+    loginUrl: "https://www.rutasdelpacifico.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH. Interurban route — billing cadence may differ."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Autopista Los Libertadores (Ruta 57)
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: los-libertadores
+    name: "Autopista Los Libertadores (Ruta 57)"
+    concesionaria: "Los Libertadores"
+    scraper: loslibertadores
+    enabled: true
+    researched: false
+    # NOTE: README lists "autopistaloislibertadores.cl" (likely a typo for
+    # "loslibertadores"). Verify the real domain before enabling.
+    loginUrl: "https://www.autopistaloslibertadores.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH. Confirm domain spelling."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Ruta del Maipo (Ruta 5 Sur)
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: ruta-del-maipo
+    name: "Ruta del Maipo (Ruta 5 Sur)"
+    concesionaria: "Ruta del Maipo"
+    scraper: rutadelmaipo
+    enabled: true
+    researched: false
+    loginUrl: "https://www.rutadelmaipo.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Survías (Ruta 5: Talca–Chillán)
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: survias
+    name: "Survías (Ruta 5: Talca–Chillán)"
+    concesionaria: "Survías"
+    scraper: survias
+    enabled: true
+    researched: false
+    loginUrl: "https://www.survias.cl/"
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors:
+      rut: "input[name='rut']"
+      password: "input[type='password']"
+      submit: "button[type='submit']"
+      loginError: ".error, .alert-danger"
+    notes: "NEEDS RESEARCH."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Autovía Santiago–Lampa — no public portal known yet
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: santiago-lampa
+    name: "Autovía Santiago–Lampa"
+    concesionaria: "—"
+    scraper: generic
+    enabled: false
+    researched: false
+    loginUrl: ""
+    rutFormat: combined
+    fileFormat: xlsx
+    selectors: {}
+    notes: "No portal identified. Disabled until a portal/billing channel exists."
