@@ -3,22 +3,22 @@
 The Docker image is Cloud Run compatible. Chromium is launched with
 `--no-sandbox` (see `src/scrapers/base.ts`), which Cloud Run requires.
 
-## ⚠️ Interactive vs. scheduled runs
+## ⚠️ Two things make a scheduled Cloud Run job tricky
 
-The default flow is **interactive**: it prompts for your RUT once and a password
-per portal, and — by design — never stores credentials. That is fundamentally at
-odds with an unattended, scheduled Cloud Run job.
+1. **Interactive by design.** The flow prompts for your RUT once and a password
+   per portal, and never stores credentials — fundamentally at odds with an
+   unattended job. For a scheduled run you'd need to inject credentials at
+   runtime (e.g. from Secret Manager) and add a non-interactive credential
+   source to `src/cli/prompt.ts`. That trades the "no credential storage"
+   guarantee for automation — choose deliberately.
+2. **Output is a local file.** The tool writes `./output/TAG Chile YYYY-MM.xlsx`.
+   Cloud Run's filesystem is ephemeral, so a scheduled run must **ship the file
+   somewhere** or it's lost. Options: upload to a GCS bucket, or wire up the
+   email/WhatsApp delivery on the roadmap.
 
-You have two realistic options:
-
-1. **Interactive / on-demand (recommended).** Run locally or via
-   `docker compose run --rm consolidator`. Cloud Run is then only useful for the
-   Sheets-writing/processing portions, not for headless scheduled scraping.
-2. **Non-interactive (advanced).** If you accept supplying credentials to a
-   scheduled job, inject them at runtime from **Secret Manager** (never bake them
-   into the image or repo) and add a non-interactive credential source to
-   `src/cli/prompt.ts`. This trades the "no credential storage" guarantee for
-   automation — choose deliberately.
+For most people, the **local / on-demand** run (or `docker compose run --rm`) is
+the right mode, and Cloud Run is only worth it once you've added both a
+non-interactive credential source and a delivery step.
 
 ## Build & push the image
 
@@ -30,36 +30,18 @@ IMAGE="$REGION-docker.pkg.dev/$PROJECT/tag/consolidator:latest"
 gcloud builds submit --tag "$IMAGE"
 ```
 
-## Secrets
+## Persisting the output to GCS (example)
 
-Store the Google service-account JSON in Secret Manager and mount it at runtime:
-
-```bash
-gcloud secrets create tag-sa-key --data-file=./secrets/service-account.json
-```
-
-Mount the secret as a file and point `GOOGLE_SERVICE_ACCOUNT_PATH` at the mount
-path. Set `GOOGLE_SHEET_ID` and `ANTHROPIC_API_KEY` as env vars (the latter
-ideally also from Secret Manager).
-
-## Deploy a job
+If you go the scheduled route, mount/copy the result to a bucket after the run,
+e.g. add a `gsutil cp ./output/*.xlsx gs://<your-bucket>/tag/` step in an entry
+wrapper, or run the container in a job that uploads on completion.
 
 ```bash
 gcloud run jobs create tag-consolidator \
   --image "$IMAGE" \
   --region "$REGION" \
-  --set-secrets "/secrets/service-account.json=tag-sa-key:latest" \
-  --set-env-vars "GOOGLE_SERVICE_ACCOUNT_PATH=/secrets/service-account.json,GOOGLE_SHEET_ID=...,HEADLESS=true"
+  --set-env-vars "HEADLESS=true,OUTPUT_DIR=/app/output"
 ```
 
-## Schedule (only meaningful for a non-interactive build)
-
-```bash
-gcloud scheduler jobs create http tag-monthly \
-  --schedule "0 9 1 * *" \
-  --uri "https://<region>-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT/jobs/tag-consolidator:run" \
-  --http-method POST \
-  --oauth-service-account-email "<runner-sa>@$PROJECT.iam.gserviceaccount.com"
-```
-
-No persistent storage is needed — all output goes directly to Google Sheets.
+`ANTHROPIC_API_KEY` is optional; set it (ideally via Secret Manager) only if you
+want the LLM navigation fallback.

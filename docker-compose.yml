@@ -14,8 +14,10 @@ services:
     env_file:
       - .env
     volumes:
-      # Mount your Google service-account key (read-only) and the output dir.
-      - ./secrets:/app/secrets:ro
+      # Config is bind-mounted so edits to your RUT/plates and portal selectors
+      # take effect WITHOUT rebuilding the image.
+      - ./config:/app/config:ro
+      # The generated .xlsx workbook lands here on your host.
       - ./output:/app/output
       - ./.downloads:/app/.downloads
     stdin_open: true

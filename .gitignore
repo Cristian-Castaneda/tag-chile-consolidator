@@ -148,5 +148,5 @@ secrets/
 *.serviceaccount.json
 # Transient browser downloads + failure screenshots
 .downloads/
-# Consolidated local output (JSON/CSV fallback when Sheets isn't configured)
-output/
+# Consolidated .xlsx output (the deliverable) — only the repo-root output dir
+/output/

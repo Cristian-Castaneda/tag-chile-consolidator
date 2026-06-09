@@ -1,13 +1,16 @@
 // ════════════════════════════════════════════════════════════════════════════
-// writer.ts — write per-autopista tabs, per-car tabs, and a master summary.
+// workbook.ts — write the consolidated data to a single local .xlsx file.
 //
-// Output layout (see README):
+// No Google account, no service account, no API. The user gets a plain Excel
+// workbook and can do whatever they want with it. Layout (one tab each):
 //   📊 Resumen          master pivot: total per car per autopista
 //   🚗 <Plate>          all transits for one car, across all autopistas
 //   🛣️ <Autopista>      raw normalized data from one portal
 // ════════════════════════════════════════════════════════════════════════════
 
-import type { sheets_v4 } from 'googleapis';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import * as XLSX from 'xlsx';
 import type { Profile, ScrapeResult, TransitRecord } from '../types.js';
 import { logger } from '../util/logger.js';
 
@@ -15,43 +18,40 @@ const TRANSIT_HEADER = ['Fecha', 'Patente', 'Autopista', 'Pórtico', 'Monto', 'T
 
 type Cell = string | number;
 
-export async function writeConsolidated(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
+/** Build the workbook and write it to `<outDir>/TAG Chile <period>.xlsx`. */
+export function writeWorkbook(
+  outDir: string,
   period: string,
   results: ScrapeResult[],
   profile: Profile,
-): Promise<void> {
+): string {
+  mkdirSync(outDir, { recursive: true });
   const all = results.flatMap((r) => r.records);
 
   const portals = unique(all.map((r) => r.portal)).sort();
   const platesInData = unique(all.map((r) => r.plate).filter(Boolean));
   const plates = unique([...profile.plates, ...platesInData]);
 
-  const resumenTitle = '📊 Resumen';
-  const carTitles = plates.map(carTab);
-  const portalTitles = portals.map(portalTab);
+  const wb = XLSX.utils.book_new();
+  const used = new Set<string>();
 
-  await ensureSheets(sheets, spreadsheetId, [resumenTitle, ...carTitles, ...portalTitles]);
-
-  // Master summary.
-  await writeTab(sheets, spreadsheetId, resumenTitle, buildResumen(all, plates, portals, period));
-
-  // Per-car tabs.
+  appendSheet(wb, used, '📊 Resumen', buildResumen(all, plates, portals, period));
   for (const plate of plates) {
-    const rows = all.filter((r) => r.plate === plate);
-    await writeTab(sheets, spreadsheetId, carTab(plate), transitTable(rows));
+    appendSheet(wb, used, `🚗 ${plate}`, transitTable(all.filter((r) => r.plate === plate)));
+  }
+  for (const portal of portals) {
+    appendSheet(wb, used, `🛣️ ${portal}`, transitTable(all.filter((r) => r.portal === portal)));
   }
 
-  // Per-autopista tabs.
-  for (const portal of portals) {
-    const rows = all.filter((r) => r.portal === portal);
-    await writeTab(sheets, spreadsheetId, portalTab(portal), transitTable(rows));
-  }
+  const path = resolve(outDir, `TAG Chile ${period}.xlsx`);
+  // Write via buffer (ESM-safe; avoids XLSX.writeFile needing fs injection).
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  writeFileSync(path, buf);
 
   logger.success(
-    `Wrote ${all.length} rows to Google Sheet: Resumen + ${plates.length} car tab(s) + ${portals.length} autopista tab(s).`,
+    `Workbook: ${path} — ${all.length} fila(s), ${plates.length} auto(s), ${portals.length} autopista(s).`,
   );
+  return path;
 }
 
 // ── tab content builders ────────────────────────────────────────────────────
@@ -90,50 +90,25 @@ function buildResumen(all: TransitRecord[], plates: string[], portals: string[],
   return rows;
 }
 
-// ── Sheets API plumbing ───────────────────────────────────────────────────────
-async function ensureSheets(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
-  titles: string[],
-): Promise<void> {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId });
-  const existing = new Set(
-    (meta.data.sheets ?? []).map((s) => s.properties?.title).filter(Boolean) as string[],
-  );
-  const toAdd = titles.filter((t) => !existing.has(t));
-  if (toAdd.length === 0) return;
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      requests: toAdd.map((title) => ({ addSheet: { properties: { title } } })),
-    },
-  });
+// ── helpers ───────────────────────────────────────────────────────────────────
+function appendSheet(wb: XLSX.WorkBook, used: Set<string>, rawName: string, rows: Cell[][]): void {
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, safeSheetName(rawName, used));
 }
 
-async function writeTab(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
-  title: string,
-  values: Cell[][],
-): Promise<void> {
-  const range = `'${title.replace(/'/g, "''")}'`;
-  await sheets.spreadsheets.values.clear({ spreadsheetId, range });
-  await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: `${range}!A1`,
-    valueInputOption: 'RAW',
-    requestBody: { values },
-  });
+/** Excel sheet names: ≤31 chars, no : \ / ? * [ ], and must be unique. */
+function safeSheetName(name: string, used: Set<string>): string {
+  const base = (name.replace(/[:\\/?*\[\]]/g, '-').trim() || 'Hoja').slice(0, 31);
+  let candidate = base;
+  let i = 2;
+  while (used.has(candidate)) {
+    const suffix = ` (${i++})`;
+    candidate = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  used.add(candidate);
+  return candidate;
 }
 
-// ── small utils ─────────────────────────────────────────────────────────────
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
-}
-function carTab(plate: string): string {
-  return `🚗 ${plate}`;
-}
-function portalTab(portal: string): string {
-  return `🛣️ ${portal}`;
 }
