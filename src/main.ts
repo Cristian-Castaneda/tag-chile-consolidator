@@ -1,13 +1,13 @@
 // ════════════════════════════════════════════════════════════════════════════
 // main.ts — orchestrator for the full user flow (see README):
-//   RUT → Servipag baseline → per-portal login + download + parse →
-//   validate vs baseline → write Google Sheets (or local fallback) → summary.
+//   period (month+year) → RUT → Servipag baseline → per-portal login + download
+//   + parse → validate vs baseline → write a local .xlsx → summary.
 //
 // CLI flags:
 //   --all                 include portals marked researched:false (best-effort)
 //   --portal=a,b,c        run only these portal ids (alias: --only)
 //   --profile=<id>        profile id from config/profiles.yml (default: env)
-//   --period=YYYY-MM      period to scrape (default: current month)
+//   --period=YYYY-MM      skip the month/year prompt and use this period
 //   --headed              run the browser headed (debugging)
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -17,10 +17,8 @@ import { LlmNavigator } from './llm/navigator.js';
 import { createScraper, type ScraperContext } from './scrapers/index.js';
 import { fetchServipagBaseline } from './scrapers/servipag.js';
 import { validate, type ValidationReport } from './consolidator/validator.js';
-import { isSheetsConfigured, getSheetsClient } from './sheets/client.js';
-import { writeConsolidated } from './sheets/writer.js';
-import { writeLocalOutput } from './util/output.js';
-import { promptRut, promptPassword } from './cli/prompt.js';
+import { writeWorkbook } from './output/workbook.js';
+import { promptRut, promptPassword, promptPeriod } from './cli/prompt.js';
 import type { AppEnv } from './config.js';
 import type { PortalConfig, Profile, ScrapeResult, ScrapeStatus } from './types.js';
 
@@ -93,9 +91,8 @@ const STATUS_ICON: Record<ScrapeStatus, string> = {
 };
 
 function reportResult(r: ScrapeResult): void {
-  const icon = STATUS_ICON[r.status];
   const tail = r.message ? ` — ${r.message}` : '';
-  logger.info(`[${r.portalName}] ${icon} ${r.status}${tail}`);
+  logger.info(`[${r.portalName}] ${STATUS_ICON[r.status]} ${r.status}${tail}`);
 }
 
 function printValidation(report: ValidationReport): void {
@@ -119,32 +116,14 @@ function printSummary(results: ScrapeResult[]): void {
   logger.info(`  ${ok}/${results.length} portal(es) con datos.`);
 }
 
-async function persist(env: AppEnv, profile: Profile, results: ScrapeResult[]): Promise<void> {
-  if (isSheetsConfigured(env.googleSheetId, env.googleServiceAccountPath)) {
-    try {
-      const sheets = await getSheetsClient(env.googleServiceAccountPath);
-      await writeConsolidated(sheets, env.googleSheetId, env.period, results, profile);
-      return;
-    } catch (err) {
-      logger.error('Error escribiendo en Google Sheets:', err instanceof Error ? err.message : String(err));
-      logger.warn('Guardando salida local como respaldo…');
-    }
-  } else {
-    logger.warn('Google Sheets no configurado — guardando salida local en ./output.');
-  }
-  const path = writeLocalOutput('output', env.period, results);
-  logger.success(`Salida local escrita: ${path}`);
-}
-
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const env = loadEnv();
   setLogLevel(env.logLevel);
-  if (args.period) env.period = args.period;
   if (args.headed) env.headless = false;
 
   const profile = getProfile(args.profile ?? env.profileId);
-  logger.info(`🛣️  TAG Chile Consolidator — perfil "${profile.label}", período ${env.period}`);
+  logger.info(`🛣️  TAG Chile Consolidator — perfil "${profile.label}"`);
 
   const targets = selectTargets(loadPortals(), args);
   if (targets.length === 0) {
@@ -152,6 +131,10 @@ async function main(): Promise<void> {
     return;
   }
   logger.info(`Portales objetivo: ${targets.map((p) => p.name).join(', ')}`);
+
+  // Period: month + year (prompted with validation) unless --period was given.
+  const period = args.period ?? (await promptPeriod());
+  logger.info(`Período: ${period}`);
 
   const navigator = new LlmNavigator({
     apiKey: env.anthropicApiKey,
@@ -166,7 +149,7 @@ async function main(): Promise<void> {
     navigator,
     downloadDir: env.downloadDir,
     headless: env.headless,
-    period: env.period,
+    period,
     plates: profile.plates,
   };
 
@@ -215,10 +198,14 @@ async function main(): Promise<void> {
   // 4. Validation.
   printValidation(validate(results, baseline));
 
-  // 5 & 6. Output + summary.
-  await persist(env, profile, results);
+  // 5 & 6. Output (single .xlsx) + summary.
+  persist(env, profile, period, results);
   printSummary(results);
   logger.success('Sesión finalizada — no se retuvieron credenciales.');
+}
+
+function persist(env: AppEnv, profile: Profile, period: string, results: ScrapeResult[]): void {
+  writeWorkbook(env.outputDir, period, results, profile); // logs the output path
 }
 
 main().catch((err) => {

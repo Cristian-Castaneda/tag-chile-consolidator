@@ -63,36 +63,26 @@ export function getProfile(id: string): Profile {
 }
 
 export interface AppEnv {
-  googleSheetId: string;
-  googleServiceAccountPath: string;
   anthropicApiKey: string;
   anthropicModel: string;
   llmFallbackEnabled: boolean;
   profileId: string;
-  period: string;
   headless: boolean;
   downloadDir: string;
+  outputDir: string;
   logLevel: string;
-}
-
-/** Current period as YYYY-MM (local time). */
-export function currentPeriod(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 export function loadEnv(): AppEnv {
   const e = process.env;
   return {
-    googleSheetId: e.GOOGLE_SHEET_ID ?? '',
-    googleServiceAccountPath: e.GOOGLE_SERVICE_ACCOUNT_PATH ?? './secrets/service-account.json',
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? '',
     anthropicModel: e.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
     llmFallbackEnabled: e.LLM_FALLBACK_ENABLED !== 'false',
     profileId: e.TAG_PROFILE ?? 'default',
-    period: e.TAG_PERIOD && /^\d{4}-\d{2}$/.test(e.TAG_PERIOD) ? e.TAG_PERIOD : currentPeriod(),
     headless: e.HEADLESS !== 'false',
     downloadDir: e.DOWNLOAD_DIR ?? './.downloads',
+    outputDir: e.OUTPUT_DIR ?? './output',
     logLevel: e.LOG_LEVEL ?? 'info',
   };
 }

@@ -89,7 +89,8 @@ function readCsv(file: string): Row[] {
 }
 
 function readXlsx(file: string): Row[] {
-  const wb = XLSX.readFile(file, { cellDates: false });
+  // Read via buffer (ESM-safe; avoids XLSX.readFile needing fs injection).
+  const wb = XLSX.read(readFileSync(file), { type: 'buffer', cellDates: false });
   const sheetName = wb.SheetNames[0];
   if (!sheetName) return [];
   const sheet = wb.Sheets[sheetName];

@@ -1,7 +1,7 @@
 # 🛣️ TAG Chile Consolidator
 
 > Automated monthly statement downloader and consolidator for Chilean toll autopistas.
-> Scrapes each concesionaria portal using your RUT and credentials, downloads the monthly data, and consolidates everything into a single Google Sheet — one tab per autopista, one tab per car.
+> Scrapes each concesionaria portal using your RUT and credentials, downloads the monthly data, and consolidates everything into a single Excel (`.xlsx`) workbook — one tab per autopista, one tab per car.
 
 ---
 
@@ -17,7 +17,7 @@ Every month, Chilean drivers with TAG contracts must visit up to 10 different co
 - Per-portal login with password only (RUT already known)
 - Pre-scrape validation via Servipag to confirm total outstanding balance
 - Post-scrape cross-check: alerts if scraped data doesn't match Servipag totals
-- Google Sheets output: one dedicated sheet per autopista + one summary sheet per car
+- Excel (`.xlsx`) output: one tab per autopista + one summary tab per car — **no Google account required**
 - No credential storage: RUT and passwords are used in-session only and never persisted
 - Multi-profile support: run for different RUTs via config file (no hardcoded values)
 - Docker-ready: runs locally or deployable to Cloud Run
@@ -49,7 +49,7 @@ Every month, Chilean drivers with TAG contracts must visit up to 10 different co
 ## User Flow
 
 ```
-1. Prompt: enter your RUT
+1. Prompt: choose the period (month 1-12, then 4-digit year), then enter your RUT
         │
         ▼
 2. Servipag lookup (by RUT)
@@ -67,7 +67,7 @@ Every month, Chilean drivers with TAG contracts must visit up to 10 different co
    d. Download CSV / XLSX for the current period
    e. Confirm successful download to user
    f. Parse and normalize file to common schema
-   g. Write data to dedicated Google Sheet tab for this autopista
+   g. Add this autopista's data as a tab in the consolidated workbook
         │
         ▼
 4. Post-loop validation
@@ -75,9 +75,9 @@ Every month, Chilean drivers with TAG contracts must visit up to 10 different co
    → Alert if discrepancy detected (missing portal, failed download, etc.)
         │
         ▼
-5. Generate summary sheets
-   → One sheet per car/plate with monthly breakdown
-   → One master summary sheet across all autopistas and cars
+5. Generate summary tabs
+   → One tab per car/plate with monthly breakdown
+   → One master "Resumen" tab across all autopistas and cars
         │
         ▼
 6. Session ends — no credentials retained
@@ -114,9 +114,8 @@ tag-chile-consolidator/
 │   │   ├── parser.ts               # Normalize each portal's CSV/XLSX to common schema
 │   │   └── validator.ts            # Cross-check scraped totals vs Servipag baseline
 │   │
-│   └── sheets/
-│       ├── client.ts               # Google Sheets API auth and client setup
-│       └── writer.ts               # Write per-autopista tabs and per-car summary tabs
+│   └── output/
+│       └── workbook.ts             # Write the consolidated .xlsx (per-autopista + per-car tabs)
 │
 ├── package.json
 ├── tsconfig.json
@@ -127,7 +126,7 @@ tag-chile-consolidator/
 
 ## Common Data Schema
 
-Every portal's output is normalized to this shape before writing to Sheets:
+Every portal's output is normalized to this shape before writing to the workbook:
 
 | Field | Type | Description |
 |---|---|---|
@@ -141,10 +140,14 @@ Every portal's output is normalized to this shape before writing to Sheets:
 
 ---
 
-## Google Sheets Output Structure
+## Output (Excel workbook)
+
+A single local `.xlsx` is written to `./output/TAG Chile YYYY-MM.xlsx`. No Google
+account, API, or service account is involved — open it in Excel, LibreOffice, or
+upload it to Google Sheets yourself if you like.
 
 ```
-[Workbook: TAG Chile YYYY-MM]
+[Workbook: TAG Chile YYYY-MM.xlsx]
 │
 ├── 📊 Resumen                     # Master summary: total per car per autopista
 ├── 🚗 [Plate 1]                   # All transits for car 1, across all autopistas
@@ -160,10 +163,10 @@ Every portal's output is normalized to this shape before writing to Sheets:
 
 ## Prerequisites
 
-- Node.js 20+
-- Docker and Docker Compose (for containerized runs)
-- A Google Cloud project with Sheets API enabled
-- A Google service account JSON key with write access to your target spreadsheet
+- Node.js 20+ (for the local run) — or just Docker (for the container run)
+- No Google Cloud project, spreadsheet, or service account needed — output is a
+  local `.xlsx` file
+- (Optional) An Anthropic API key, only if you want the LLM navigation fallback
 
 ---
 
@@ -171,9 +174,9 @@ Every portal's output is normalized to this shape before writing to Sheets:
 
 Defined in `.env` (never committed). See `.env.example` for the full list. Key variables:
 
-- `GOOGLE_SHEET_ID` — the target Google Spreadsheet ID
-- `GOOGLE_SERVICE_ACCOUNT_PATH` — path to your service account JSON key
-- `ANTHROPIC_API_KEY` — used by the LLM navigation layer for resilient portal scraping
+- `ANTHROPIC_API_KEY` — **optional**; enables the LLM navigation fallback. Leave empty to use selectors only
+- `OUTPUT_DIR` — where the `.xlsx` is written (default `./output`)
+- `TAG_PROFILE` — which profile from `config/profiles.yml` to run (default `default`)
 
 No RUTs, passwords, or personal credentials are stored in environment variables or config files.
 
@@ -232,9 +235,7 @@ cd tag-chile-consolidator
 cp .env.example .env
 
 # 3. Edit config/profiles.yml with your RUT + plates.
-#    (Optional) For Google Sheets output, drop your service-account key at
-#    ./secrets/service-account.json and set GOOGLE_SHEET_ID in .env.
-#    Without it, results are written to ./output as JSON + CSV.
+#    The consolidated .xlsx will be written to ./output.
 
 # 4. Build the image once, then run interactively (it prompts for RUT + passwords)
 docker compose build
@@ -256,9 +257,10 @@ needs no rebuild — only changes under `src/` require `docker compose build` ag
 The Docker image is Cloud Run compatible. Key considerations:
 
 - Playwright requires `--no-sandbox` flag in Cloud Run (already configured in `Dockerfile`)
-- Schedule monthly runs via Cloud Scheduler triggering a Cloud Run job
-- Store `GOOGLE_SERVICE_ACCOUNT_PATH` content in Secret Manager and mount at runtime
-- No persistent storage needed — all output goes directly to Google Sheets
+- Output is a local `.xlsx`. Cloud Run's filesystem is ephemeral, so to keep
+  results you must ship the file somewhere (upload to GCS, email it — see the
+  roadmap). Otherwise a scheduled run produces nothing durable.
+- The flow is interactive by default — see the note in `docs/cloud-run.md`.
 
 Deployment steps are documented in `docs/cloud-run.md`.
 
@@ -282,7 +284,7 @@ This makes the tool resilient to minor UI updates without requiring code changes
 - Passwords are prompted interactively at runtime via CLI and held in memory only for the duration of that portal's session
 - No credentials are written to disk, logs, environment variables, or config files
 - The tool operates in a sandboxed Playwright browser context that is destroyed after each session
-- Google Sheets access uses a service account scoped to the specific spreadsheet only
+- Output is a local `.xlsx` file you control — no third-party account, API, or cloud storage is touched
 
 ---
 
@@ -304,7 +306,7 @@ Open an issue before starting a large change.
 - [ ] Email delivery with PDF summary attachment
 - [ ] Web UI for non-technical users (profile + portal management)
 - [ ] Multi-RUT batch mode for fleet managers
-- [ ] Historical trend charts in the Sheets output
+- [ ] Historical trend charts in the workbook output
 
 ---
 
