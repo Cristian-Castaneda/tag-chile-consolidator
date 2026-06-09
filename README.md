@@ -191,11 +191,16 @@ Defines user profiles: a label, a RUT, and the list of car plates associated wit
 
 ---
 
-## Running Locally
+> **Pick one of the two options below — they are alternatives, not sequential
+> steps.** Use the local option if you have Node on your machine; use Docker if
+> you'd rather not install Node/npm/Playwright on your host at all.
+
+## Running Locally (Option A — requires Node 20+)
 
 ```bash
 # 1. Clone the repo
 git clone https://github.com/your-org/tag-chile-consolidator
+cd tag-chile-consolidator
 
 # 2. Install dependencies
 npm install
@@ -206,20 +211,43 @@ npx playwright install chromium
 # 4. Copy and fill in your env file
 cp .env.example .env
 
-# 5. Run
+# 5. Edit config/profiles.yml with your RUT + plates, then run
 npm start
 ```
 
 ---
 
-## Running with Docker
+## Running with Docker (Option B — only Docker required)
+
+This path needs **only Docker** — no Node, npm, or Playwright on your machine,
+and your global npm config is never touched. The image bundles Node, every
+dependency, and Chromium. So you do **not** run `npm install` here.
 
 ```bash
-# Build and run
-docker compose up --build
+# 1. Clone the repo
+git clone https://github.com/your-org/tag-chile-consolidator
+cd tag-chile-consolidator
 
-# The container includes Chromium — no local browser install needed
+# 2. Create your env file (required by compose, even if mostly empty)
+cp .env.example .env
+
+# 3. Edit config/profiles.yml with your RUT + plates.
+#    (Optional) For Google Sheets output, drop your service-account key at
+#    ./secrets/service-account.json and set GOOGLE_SHEET_ID in .env.
+#    Without it, results are written to ./output as JSON + CSV.
+
+# 4. Build the image once, then run interactively (it prompts for RUT + passwords)
+docker compose build
+docker compose run --rm consolidator --portal=costanera-norte
 ```
+
+Use `docker compose run` (not `up`) so the terminal is attached for the prompts.
+`config/` and `output/` are bind-mounted, so editing your RUT or reading results
+needs no rebuild — only changes under `src/` require `docker compose build` again.
+
+> Headed mode (`--headed`, to watch the browser) needs a desktop/X11 and is
+> awkward in Docker — use Option A for that. In headless Docker runs, failure
+> screenshots are saved to `./.downloads` instead.
 
 ---
 
