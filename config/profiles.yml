@@ -1,0 +1,28 @@
+# ════════════════════════════════════════════════════════════════════════════
+# profiles.yml — user profiles.
+#
+# A profile bundles a RUT with the car plates registered to it. The tool runs
+# one profile per session (selected via TAG_PROFILE in .env, matched by `id`).
+#
+# ⚠️  NEVER store passwords here. Passwords are prompted interactively at
+#     runtime, per portal, and held in memory only for that portal's session.
+#
+# The RUT below is illustrative — replace it with your own. The plates are
+# used to label the per-car summary tabs and to attribute transits when a
+# portal account holds more than one vehicle.
+# ════════════════════════════════════════════════════════════════════════════
+
+profiles:
+  - id: default
+    label: "Default Profile"
+    rut: "12345678-9"          # ← replace with your RUT (with verifier digit)
+    plates:
+      - "ABCD12"
+      - "WXYZ34"
+
+  # Add more profiles as needed:
+  # - id: family
+  #   label: "Family Fleet"
+  #   rut: "9876543-2"
+  #   plates:
+  #     - "JKLM56"

@@ -1,0 +1,22 @@
+# Local Docker orchestration.
+#
+# The flow is interactive (it prompts for RUT + passwords), so run it with a TTY:
+#
+#   docker compose run --rm consolidator
+#   docker compose run --rm consolidator --portal=costanera-norte --headed
+#
+# `docker compose up` also works but does not attach an interactive stdin.
+
+services:
+  consolidator:
+    build: .
+    image: tag-chile-consolidator
+    env_file:
+      - .env
+    volumes:
+      # Mount your Google service-account key (read-only) and the output dir.
+      - ./secrets:/app/secrets:ro
+      - ./output:/app/output
+      - ./.downloads:/app/.downloads
+    stdin_open: true
+    tty: true
