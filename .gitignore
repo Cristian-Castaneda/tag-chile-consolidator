@@ -148,5 +148,9 @@ secrets/
 *.serviceaccount.json
 # Transient browser downloads + failure screenshots
 .downloads/
+# Servipag persistent Chrome profile (holds the Cloudflare clearance cookie)
+.servipag/
+# Throwaway local exploration / probe artifacts
+tmp/
 # Consolidated .xlsx output (the deliverable) — only the repo-root output dir
 /output/
